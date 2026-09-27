@@ -23,7 +23,8 @@ public static class IncidentEndpoints
 
         group.MapGet("/severity-summary", GetSeveritySummaryAsync)
             .WithName("GetIncidentSeveritySummary")
-            .Produces<IReadOnlyList<IncidentSeveritySummaryResponse>>();
+            .Produces<IReadOnlyList<IncidentSeveritySummaryResponse>>()
+            .ProducesValidationProblem();
 
         return endpoints;
     }
@@ -66,10 +67,26 @@ public static class IncidentEndpoints
     }
 
     private static async Task<IResult> GetSeveritySummaryAsync(
+        string? status,
         IncidentQueries queries,
         CancellationToken cancellationToken)
     {
-        var summary = await queries.GetSeveritySummaryAsync(cancellationToken);
+        IncidentStatus? parsedStatus = null;
+        if (status is not null)
+        {
+            if (!Enum.TryParse<IncidentStatus>(status, ignoreCase: true, out var candidate)
+                || !Enum.IsDefined(candidate))
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["status"] = ["Допустимі значення: New, Triaged, InProgress, Resolved, Closed."]
+                });
+            }
+
+            parsedStatus = candidate;
+        }
+
+        var summary = await queries.GetSeveritySummaryAsync(parsedStatus, cancellationToken);
         return Results.Ok(summary);
     }
 }
