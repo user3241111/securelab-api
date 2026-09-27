@@ -13,6 +13,10 @@ Accept: application/json
 GET {{host}}/api/incidents?status=Triaged
 Accept: application/json
 
+### Empty list flow: expected 200 with empty array []
+GET {{host}}/api/incidents?status=Resolved
+Accept: application/json
+
 ### Existing details
 GET {{host}}/api/incidents/{{aliceIncidentId}}
 Accept: application/json
@@ -25,6 +29,15 @@ Accept: application/json
 GET {{host}}/api/incidents?status=Unknown
 Accept: application/json
 
-### Lab 1 extension point: expected 501 before student implementation
+### Lab 1 extension point: expected 200 OK with severity summary
+
+# Підсумок інцидентів за severity (Етап 3, варіант 2-A)
+# Метод: GET /api/incidents/severity-summary
+# Очікувана відповідь: 200 OK, Content-Type: application/json
+# Тіло: JSON-масив об'єктів { severity: string, count: int }
+# Політика нульових груп: лише наявні групи (baseline повертає Low, Medium, High)
+# Сортування: count descending, severity ascending
+# Заборонені дані: description, owner ID, email, comments
+
 GET {{host}}/api/incidents/severity-summary
 Accept: application/json
