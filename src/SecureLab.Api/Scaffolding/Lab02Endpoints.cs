@@ -5,34 +5,81 @@ using SecureLab.Api.Data.Entities;
 
 namespace SecureLab.Api.Scaffolding;
 
-// Навчальний старт ЛР 02. Запускати лише з локальними штучними даними.
+// ЛР 02. Безпечний пошук та серверна валідація.
 public static class Lab02Endpoints
 {
     public static void MapLab02Endpoints(this WebApplication app)
     {
-        // GET: пошук інцидентів.
-        // Вразливу реалізацію залишено для наступного етапу лабораторної.
+        // GET: безпечний пошук інцидентів.
         app.MapGet("/api/incidents/search", async (
             string? q,
             string? sortBy,
             SecureLabDbContext db,
             CancellationToken ct) =>
         {
-            var order = sortBy switch
+            // Дозволені значення sortBy.
+            // Невідоме значення повертає HTTP 400.
+            if (sortBy is not (null or "" or
+                "createdAtUtc" or "severity" or "status"))
             {
-                null or "" or "createdAtUtc" => "created_at_utc DESC",
-                "severity" => "severity",
-                "status" => "status",
-                _ => sortBy
+                return Results.ValidationProblem(
+                    new Dictionary<string, string[]>
+                    {
+                        ["sortBy"] =
+                        [
+                            "Allowed values: createdAtUtc, severity, status."
+                        ]
+                    });
+            }
+
+            // Екранування спеціальних символів LIKE.
+            // %, _ та \ мають сприйматися буквально.
+            static string EscapeLike(string value) =>
+                value.Replace("\\", "\\\\")
+                     .Replace("%", "\\%")
+                     .Replace("_", "\\_");
+
+            var search = q ?? "";
+            var pattern = "%" + EscapeLike(search) + "%";
+
+            // LINQ замість конкатенації SQL.
+            var query = db.Incidents
+                .AsNoTracking()
+                .Where(i =>
+                    EF.Functions.ILike(
+                        i.Title, pattern, "\\") ||
+                    EF.Functions.ILike(
+                        i.Description, pattern, "\\"));
+
+            // Дозволені варіанти сортування.
+            // Другий ключ Id забезпечує стабільний порядок.
+            var sorted = sortBy switch
+            {
+                "severity" =>
+                    query.OrderBy(i =>
+                        i.Severity == IncidentSeverity.Critical ? 0 :
+                        i.Severity == IncidentSeverity.High ? 1 :
+                        i.Severity == IncidentSeverity.Medium ? 2 : 3)
+                         .ThenBy(i => i.Id),
+
+                "status" =>
+                    query.OrderBy(i =>
+                        i.Status == IncidentStatus.New ? 0 :
+                        i.Status == IncidentStatus.Triaged ? 1 :
+                        i.Status == IncidentStatus.InProgress ? 2 :
+                        i.Status == IncidentStatus.Resolved ? 3 : 4)
+                         .ThenBy(i => i.Id),
+
+                // Default і createdAtUtc:
+                // від найновіших до найстаріших.
+                _ =>
+                    query.OrderByDescending(i => i.CreatedAtUtc)
+                         .ThenBy(i => i.Id)
             };
 
-            var sql = "SELECT * FROM incidents WHERE title ILIKE '%" + (q ?? "")
-                + "%' OR description ILIKE '%" + (q ?? "")
-                + "%' ORDER BY " + order + " LIMIT 50";
-
-            var rows = await db.Incidents
-                .FromSqlRaw(sql)
-                .AsNoTracking()
+            // Максимум 50 результатів.
+            var rows = await sorted
+                .Take(50)
                 .ToListAsync(ct);
 
             return Results.Ok(rows.Select(row => new
