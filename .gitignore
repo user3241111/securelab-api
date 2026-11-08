@@ -25,3 +25,5 @@ appsettings.Local.json
 *.sql.gz
 *.log
 
+
+cookies.txt

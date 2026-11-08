@@ -1,4 +1,5 @@
 
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
@@ -6,6 +7,7 @@ using SecureLab.Api.Data.Entities;
 namespace SecureLab.Api.Scaffolding;
 
 // ЛР 02. Безпечний пошук та серверна валідація.
+// ЛР 03. Автентифікація та захист створення інцидентів.
 public static class Lab02Endpoints
 {
     public static void MapLab02Endpoints(this WebApplication app)
@@ -93,12 +95,22 @@ public static class Lab02Endpoints
             }));
         });
 
-        // POST: створення інциденту з серверною валідацією.
+        // POST: створення інциденту лише авторизованим користувачем.
         app.MapPost("/api/incidents", async (
             CreateIncidentRequest request,
+            HttpContext context,
+            UserManager<ApplicationUser> users,
             SecureLabDbContext db,
             CancellationToken ct) =>
         {
+            // Отримання користувача з перевіреного контексту.
+            var currentUser = await users.GetUserAsync(context.User);
+
+            if (currentUser is null)
+            {
+                return Results.Unauthorized();
+            }
+
             var errors = new Dictionary<string, string[]>();
 
             // Перевірка назви до Trim().
@@ -147,7 +159,11 @@ public static class Lab02Endpoints
             var incident = new Incident
             {
                 Id = Guid.NewGuid(),
-                OwnerUserId = DbSeeder.AliceId,
+
+                // Власник визначається за автентифікованою сесією.
+                // Ідентифікатор не приймається від клієнта.
+                OwnerUserId = currentUser.Id,
+
                 Title = request.Title!.Trim(),
                 Description = request.Description?.Trim() ?? "",
                 Severity = severity,
@@ -174,7 +190,8 @@ public static class Lab02Endpoints
                     incident.OccurredAtUtc,
                     incident.CreatedAtUtc
                 });
-        });
+        })
+        .RequireAuthorization();
     }
 }
 
