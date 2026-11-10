@@ -1,4 +1,7 @@
+
+using Microsoft.EntityFrameworkCore;
 using SecureLab.Api.Application.Incidents;
+using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 using SecureLab.Api.Presentation.Contracts;
 
@@ -21,6 +24,13 @@ public static class IncidentEndpoints
             .Produces<IncidentDetailsResponse>()
             .ProducesProblem(StatusCodes.Status404NotFound);
 
+        // Тимчасова вразлива операція для локального PoC ЛР №4.
+        // Перевірку прав доступу буде додано у fixed state.
+        group.MapPut("/{id:guid}", UpdateContentVulnerableAsync)
+            .WithName("UpdateIncidentContent")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
         group.MapGet("/severity-summary", GetSeveritySummaryAsync)
             .WithName("GetIncidentSeveritySummary")
             .Produces<IReadOnlyList<IncidentSeveritySummaryResponse>>()
@@ -35,21 +45,28 @@ public static class IncidentEndpoints
         CancellationToken cancellationToken)
     {
         IncidentStatus? parsedStatus = null;
+
         if (status is not null)
         {
-            if (!Enum.TryParse<IncidentStatus>(status, ignoreCase: true, out var candidate)
+            if (!Enum.TryParse<IncidentStatus>(
+                    status, ignoreCase: true, out var candidate)
                 || !Enum.IsDefined(candidate))
             {
-                return Results.ValidationProblem(new Dictionary<string, string[]>
-                {
-                    ["status"] = ["Допустимі значення: New, Triaged, InProgress, Resolved, Closed."]
-                });
+                return Results.ValidationProblem(
+                    new Dictionary<string, string[]>
+                    {
+                        ["status"] =
+                        [
+                            "Допустимі значення: New, Triaged, InProgress, Resolved, Closed."
+                        ]
+                    });
             }
 
             parsedStatus = candidate;
         }
 
-        return Results.Ok(await queries.GetListAsync(parsedStatus, cancellationToken));
+        return Results.Ok(
+            await queries.GetListAsync(parsedStatus, cancellationToken));
     }
 
     private static async Task<IResult> GetDetailsAsync(
@@ -58,6 +75,7 @@ public static class IncidentEndpoints
         CancellationToken cancellationToken)
     {
         var incident = await queries.GetDetailsAsync(id, cancellationToken);
+
         return incident is null
             ? Results.Problem(
                 title: "Інцидент не знайдено",
@@ -66,27 +84,69 @@ public static class IncidentEndpoints
             : Results.Ok(incident);
     }
 
+    private static async Task<IResult> UpdateContentVulnerableAsync(
+        Guid id,
+        UpdateIncidentRequest request,
+        SecureLabDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        // Навмисно відсутня перевірка власника та ролі.
+        var incident = await dbContext.Incidents
+            .SingleOrDefaultAsync(
+                item => item.Id == id,
+                cancellationToken);
+
+        if (incident is null)
+        {
+            return Results.NotFound();
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Title)
+            || string.IsNullOrWhiteSpace(request.Description))
+        {
+            return Results.BadRequest(
+                "Title і Description не можуть бути порожніми.");
+        }
+
+        incident.Title = request.Title;
+        incident.Description = request.Description;
+        incident.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Results.NoContent();
+    }
+
     private static async Task<IResult> GetSeveritySummaryAsync(
         string? status,
         IncidentQueries queries,
         CancellationToken cancellationToken)
     {
         IncidentStatus? parsedStatus = null;
+
         if (status is not null)
         {
-            if (!Enum.TryParse<IncidentStatus>(status, ignoreCase: true, out var candidate)
+            if (!Enum.TryParse<IncidentStatus>(
+                    status, ignoreCase: true, out var candidate)
                 || !Enum.IsDefined(candidate))
             {
-                return Results.ValidationProblem(new Dictionary<string, string[]>
-                {
-                    ["status"] = ["Допустимі значення: New, Triaged, InProgress, Resolved, Closed."]
-                });
+                return Results.ValidationProblem(
+                    new Dictionary<string, string[]>
+                    {
+                        ["status"] =
+                        [
+                            "Допустимі значення: New, Triaged, InProgress, Resolved, Closed."
+                        ]
+                    });
             }
 
             parsedStatus = candidate;
         }
 
-        var summary = await queries.GetSeveritySummaryAsync(parsedStatus, cancellationToken);
+        var summary = await queries.GetSeveritySummaryAsync(
+            parsedStatus,
+            cancellationToken);
+
         return Results.Ok(summary);
     }
 }
