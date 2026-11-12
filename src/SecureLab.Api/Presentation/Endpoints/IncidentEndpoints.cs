@@ -9,10 +9,12 @@ namespace SecureLab.Api.Presentation.Endpoints;
 
 public static class IncidentEndpoints
 {
-    public static IEndpointRouteBuilder MapIncidentEndpoints(this IEndpointRouteBuilder endpoints)
+    public static IEndpointRouteBuilder MapIncidentEndpoints(
+        this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/api/incidents")
-            .WithTags("Incidents");
+            .WithTags("Incidents")
+            .RequireAuthorization();
 
         group.MapGet("/", GetListAsync)
             .WithName("GetIncidents")
@@ -22,13 +24,20 @@ public static class IncidentEndpoints
         group.MapGet("/{id:guid}", GetDetailsAsync)
             .WithName("GetIncidentDetails")
             .Produces<IncidentDetailsResponse>()
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
-        // Тимчасова вразлива операція для локального PoC ЛР №4.
-        // Перевірку прав доступу буде додано у fixed state.
-        group.MapPut("/{id:guid}", UpdateContentVulnerableAsync)
+        group.MapPut("/{id:guid}", UpdateContentAsync)
             .WithName("UpdateIncidentContent")
             .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        group.MapDelete("/{id:guid}", DeleteAsync)
+            .WithName("DeleteIncident")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapGet("/severity-summary", GetSeveritySummaryAsync)
@@ -39,17 +48,51 @@ public static class IncidentEndpoints
         return endpoints;
     }
 
+    private static IResult Forbidden()
+    {
+        return Results.Problem(
+            title: "Forbidden",
+            statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    private static IResult NotFound()
+    {
+        return Results.Problem(
+            title: "Інцидент не знайдено",
+            statusCode: StatusCodes.Status404NotFound);
+    }
+
     private static async Task<IResult> GetListAsync(
         string? status,
+        HttpContext httpContext,
         IncidentQueries queries,
         CancellationToken cancellationToken)
     {
+        var user = httpContext.User;
+
+        if (!IncidentAccessRules.CanReadList(user))
+        {
+            return Forbidden();
+        }
+
+        var isAnalyst = IncidentAccessRules.IsAnalyst(user);
+
+        var currentUserId =
+            IncidentAccessRules.GetCurrentUserId(user);
+
+        if (!isAnalyst && !currentUserId.HasValue)
+        {
+            return Forbidden();
+        }
+
         IncidentStatus? parsedStatus = null;
 
         if (status is not null)
         {
             if (!Enum.TryParse<IncidentStatus>(
-                    status, ignoreCase: true, out var candidate)
+                    status,
+                    ignoreCase: true,
+                    out var candidate)
                 || !Enum.IsDefined(candidate))
             {
                 return Results.ValidationProblem(
@@ -65,32 +108,63 @@ public static class IncidentEndpoints
             parsedStatus = candidate;
         }
 
-        return Results.Ok(
-            await queries.GetListAsync(parsedStatus, cancellationToken));
+        var ownerFilter = isAnalyst
+            ? (Guid?)null
+            : currentUserId;
+
+        var incidents = await queries.GetListAsync(
+            parsedStatus,
+            cancellationToken,
+            ownerFilter);
+
+        return Results.Ok(incidents);
     }
 
     private static async Task<IResult> GetDetailsAsync(
         Guid id,
+        HttpContext httpContext,
+        SecureLabDbContext dbContext,
         IncidentQueries queries,
         CancellationToken cancellationToken)
     {
-        var incident = await queries.GetDetailsAsync(id, cancellationToken);
+        var ownerUserId = await dbContext.Incidents
+            .AsNoTracking()
+            .Where(incident => incident.Id == id)
+            .Select(incident => (Guid?)incident.OwnerUserId)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (!ownerUserId.HasValue)
+        {
+            return NotFound();
+        }
+
+        if (!IncidentAccessRules.CanRead(
+                httpContext.User,
+                ownerUserId.Value))
+        {
+            return Forbidden();
+        }
+
+        var includeInternalComments =
+            IncidentAccessRules.IsAnalyst(httpContext.User);
+
+        var incident = await queries.GetDetailsAsync(
+            id,
+            cancellationToken,
+            includeInternalComments);
 
         return incident is null
-            ? Results.Problem(
-                title: "Інцидент не знайдено",
-                detail: $"Інцидент '{id}' не існує.",
-                statusCode: StatusCodes.Status404NotFound)
+            ? NotFound()
             : Results.Ok(incident);
     }
 
-    private static async Task<IResult> UpdateContentVulnerableAsync(
+    private static async Task<IResult> UpdateContentAsync(
         Guid id,
         UpdateIncidentRequest request,
+        HttpContext httpContext,
         SecureLabDbContext dbContext,
         CancellationToken cancellationToken)
     {
-        // Навмисно відсутня перевірка власника та ролі.
         var incident = await dbContext.Incidents
             .SingleOrDefaultAsync(
                 item => item.Id == id,
@@ -98,9 +172,27 @@ public static class IncidentEndpoints
 
         if (incident is null)
         {
-            return Results.NotFound();
+            return NotFound();
         }
 
+        // Перевіряємо право користувача на зміну інциденту.
+        if (!IncidentAccessRules.CanUpdate(
+                httpContext.User,
+                incident.OwnerUserId))
+        {
+            return Forbidden();
+        }
+
+        // A-08b: відхиляємо додаткові або заборонені поля.
+        if (request.ExtraFields.Count > 0)
+        {
+            return Results.Problem(
+                title: "Недопустимі поля запиту",
+                detail: "Дозволено змінювати лише Title та Description.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        // Перевіряємо дозволені поля.
         if (string.IsNullOrWhiteSpace(request.Title)
             || string.IsNullOrWhiteSpace(request.Description))
         {
@@ -108,9 +200,41 @@ public static class IncidentEndpoints
                 "Title і Description не можуть бути порожніми.");
         }
 
+        // Змінюємо тільки дозволені поля.
         incident.Title = request.Title;
         incident.Description = request.Description;
         incident.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> DeleteAsync(
+        Guid id,
+        HttpContext httpContext,
+        SecureLabDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var incident = await dbContext.Incidents
+            .SingleOrDefaultAsync(
+                item => item.Id == id,
+                cancellationToken);
+
+        if (incident is null)
+        {
+            return NotFound();
+        }
+
+        // Перевіряємо права згідно з матрицею доступу.
+        if (!IncidentAccessRules.CanDelete(
+                httpContext.User,
+                incident.OwnerUserId))
+        {
+            return Forbidden();
+        }
+
+        dbContext.Incidents.Remove(incident);
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -127,7 +251,9 @@ public static class IncidentEndpoints
         if (status is not null)
         {
             if (!Enum.TryParse<IncidentStatus>(
-                    status, ignoreCase: true, out var candidate)
+                    status,
+                    ignoreCase: true,
+                    out var candidate)
                 || !Enum.IsDefined(candidate))
             {
                 return Results.ValidationProblem(

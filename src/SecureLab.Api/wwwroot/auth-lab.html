@@ -1,0 +1,212 @@
+
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SecureLab — Authorization Lab</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 850px;
+            margin: 40px auto;
+            padding: 0 20px;
+            background: #f5f7fb;
+            color: #202938;
+        }
+        h1 { margin-bottom: 8px; }
+        .subtitle { color: #64748b; }
+        section {
+            background: white;
+            padding: 22px;
+            margin-top: 20px;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+        }
+        input, button {
+            padding: 10px;
+            margin: 5px 5px 5px 0;
+            border-radius: 5px;
+            border: 1px solid #cbd5e1;
+        }
+        button {
+            background: #2563eb;
+            color: white;
+            cursor: pointer;
+        }
+        pre {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            background: #f1f5f9;
+            padding: 14px;
+            border-radius: 6px;
+        }
+        .success { color: #15803d; }
+        .error { color: #b91c1c; }
+    </style>
+</head>
+<body>
+    <h1>SecureLab — Authorization Lab</h1>
+    <p class="subtitle">
+        Лабораторна робота №4: авторизація та захист від IDOR/BOLA
+    </p>
+
+    <section>
+        <h2>1. Авторизація</h2>
+        <input id="username" placeholder="Username" value="alice">
+        <input id="password" type="password" placeholder="Password">
+        <button id="loginButton">Увійти</button>
+        <button id="logoutButton">Вийти</button>
+        <p id="authResult"></p>
+    </section>
+
+    <section>
+        <h2>2. Перегляд інциденту</h2>
+        <input
+            id="incidentId"
+            style="width: 340px"
+            value="20000000-0000-0000-0000-000000000001"
+            placeholder="Incident ID">
+        <button id="loadButton">Завантажити</button>
+        <pre id="incidentResult">Очікування запиту...</pre>
+    </section>
+
+    <section>
+        <h2>3. Демонстрація IDOR/BOLA</h2>
+        <button id="ownButton">Інцидент Alice</button>
+        <button id="foreignButton">Інцидент Bob</button>
+        <p class="subtitle">
+            Для Alice доступ до інциденту Bob повинен завершитися HTTP 403.
+        </p>
+    </section>
+
+    <script>
+        "use strict";
+
+        const aliceIncident =
+            "20000000-0000-0000-0000-000000000001";
+
+        const bobIncident =
+            "20000000-0000-0000-0000-000000000002";
+
+        const authResult = document.getElementById("authResult");
+        const incidentResult = document.getElementById("incidentResult");
+        const incidentInput = document.getElementById("incidentId");
+
+        async function login() {
+            const userName =
+                document.getElementById("username").value;
+
+            const password =
+                document.getElementById("password").value;
+
+            try {
+                const response = await fetch("/api/auth/login", {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ userName, password })
+                });
+
+                authResult.textContent = response.ok
+                    ? "Авторизація успішна (HTTP " + response.status + ")"
+                    : "Помилка авторизації (HTTP " + response.status + ")";
+
+                authResult.className =
+                    response.ok ? "success" : "error";
+            }
+            catch {
+                authResult.textContent =
+                    "Помилка з'єднання із сервером.";
+                authResult.className = "error";
+            }
+        }
+
+        async function logout() {
+            try {
+                const response = await fetch("/api/auth/logout", {
+                    method: "POST",
+                    credentials: "same-origin"
+                });
+
+                authResult.textContent =
+                    "Вихід: HTTP " + response.status;
+
+                authResult.className =
+                    response.ok ? "success" : "error";
+            }
+            catch {
+                authResult.textContent =
+                    "Не вдалося виконати вихід.";
+                authResult.className = "error";
+            }
+        }
+
+        async function loadIncidentDetails(id) {
+            incidentInput.value = id;
+            incidentResult.textContent = "Завантаження...";
+
+            try {
+                const response = await fetch(
+                    "/api/incidents/" + encodeURIComponent(id),
+                    { credentials: "same-origin" }
+                );
+
+                if (response.status === 401) {
+                    incidentResult.textContent =
+                        "HTTP 401 Unauthorized: потрібно увійти.";
+                    return;
+                }
+
+                if (response.status === 403) {
+                    incidentResult.textContent =
+                        "HTTP 403 Forbidden: доступ до інциденту заборонено.";
+                    return;
+                }
+
+                if (response.status === 404) {
+                    incidentResult.textContent =
+                        "HTTP 404 Not Found: інцидент не знайдено.";
+                    return;
+                }
+
+                if (!response.ok) {
+                    incidentResult.textContent =
+                        "Помилка HTTP " + response.status;
+                    return;
+                }
+
+                const incident = await response.json();
+
+                incidentResult.textContent = JSON.stringify(
+                    incident, null, 2
+                );
+            }
+            catch {
+                incidentResult.textContent =
+                    "Помилка з'єднання із сервером.";
+            }
+        }
+
+        document.getElementById("loginButton")
+            .addEventListener("click", login);
+
+        document.getElementById("logoutButton")
+            .addEventListener("click", logout);
+
+        document.getElementById("loadButton")
+            .addEventListener("click", () =>
+                loadIncidentDetails(incidentInput.value));
+
+        document.getElementById("ownButton")
+            .addEventListener("click", () =>
+                loadIncidentDetails(aliceIncident));
+
+        document.getElementById("foreignButton")
+            .addEventListener("click", () =>
+                loadIncidentDetails(bobIncident));
+    </script>
+</body>
+</html>

@@ -1,3 +1,4 @@
+
 using Microsoft.EntityFrameworkCore;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
@@ -5,18 +6,31 @@ using SecureLab.Api.Presentation.Contracts;
 
 namespace SecureLab.Api.Application.Incidents;
 
-public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<IncidentQueries> logger)
+public sealed class IncidentQueries(
+    SecureLabDbContext dbContext,
+    ILogger<IncidentQueries> logger)
 {
     public async Task<IReadOnlyList<IncidentListItemResponse>> GetListAsync(
         IncidentStatus? status,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? ownerUserId = null)
     {
-        logger.LogInformation("Loading incidents with status filter {Status}", status);
+        logger.LogInformation(
+            "Loading incidents with status filter {Status}",
+            status);
 
         var query = dbContext.Incidents.AsNoTracking();
+
+        if (ownerUserId.HasValue)
+        {
+            query = query.Where(
+                incident => incident.OwnerUserId == ownerUserId.Value);
+        }
+
         if (status is not null)
         {
-            query = query.Where(incident => incident.Status == status);
+            query = query.Where(
+                incident => incident.Status == status);
         }
 
         return await query
@@ -31,9 +45,14 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
             .ToListAsync(cancellationToken);
     }
 
-    public Task<IncidentDetailsResponse?> GetDetailsAsync(Guid id, CancellationToken cancellationToken)
+    public Task<IncidentDetailsResponse?> GetDetailsAsync(
+        Guid id,
+        CancellationToken cancellationToken,
+        bool includeInternalComments = false)
     {
-        logger.LogInformation("Loading incident {IncidentId}", id);
+        logger.LogInformation(
+            "Loading incident {IncidentId}",
+            id);
 
         return dbContext.Incidents
             .AsNoTracking()
@@ -48,7 +67,8 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
                 incident.CreatedAtUtc,
                 incident.Owner.DisplayName,
                 incident.Comments
-                    .Where(comment => !comment.IsInternal)
+                    .Where(comment =>
+                        includeInternalComments || !comment.IsInternal)
                     .OrderBy(comment => comment.CreatedAtUtc)
                     .Select(comment => new IncidentCommentResponse(
                         comment.Id,
@@ -63,13 +83,16 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
         IncidentStatus? status = null,
         CancellationToken cancellationToken = default)
     {
-        logger.LogInformation("Calculating incident severity summary with status filter {Status}", status);
+        logger.LogInformation(
+            "Calculating incident severity summary with status filter {Status}",
+            status);
 
         var query = dbContext.Incidents.AsNoTracking();
 
         if (status is not null)
         {
-            query = query.Where(incident => incident.Status == status);
+            query = query.Where(
+                incident => incident.Status == status);
         }
 
         var rawGroups = await query
@@ -89,7 +112,9 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
                 item.Count))
             .ToList();
 
-        logger.LogInformation("Calculated severity summary with {GroupCount} groups", summary.Count);
+        logger.LogInformation(
+            "Calculated severity summary with {GroupCount} groups",
+            summary.Count);
 
         return summary;
     }
