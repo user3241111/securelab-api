@@ -1,3 +1,4 @@
+
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using SecureLab.Api.Data.Entities;
@@ -81,7 +82,7 @@ public static class DbSeeder
         {
             Id = BobIncidentId,
             Owner = bob,
-            Title = "Невідома спроба входу",
+            Title = "Спроба входу",
             Description = "Система зафіксувала вхід до облікового запису з нового пристрою.",
             Severity = IncidentSeverity.High,
             Status = IncidentStatus.InProgress,
@@ -92,7 +93,7 @@ public static class DbSeeder
 
         var safeTextIncident = new Incident
         {
-            Id = Guid.Parse("20000000-0000-0000-0000-000000000003"),
+            Id = SafeTextIncidentId,
             Owner = alice,
             Title = "Перевірка журналу комп'ютерного класу",
             Description = "Текст <script> має відображатися як текст, а не виконуватися як HTML.",
@@ -104,6 +105,12 @@ public static class DbSeeder
         };
 
         dbContext.Incidents.AddRange(aliceIncident, bobIncident, safeTextIncident);
+
+        // Lab 05: тестовий маркер для перевірки Stored XSS у коментарях.
+        const string Lab05Marker =
+            "<img src=x onerror=\""
+            + "document.querySelector('#lab05-marker-target')"
+            + ".setAttribute('data-lab05-marker','executed')\">";
 
         dbContext.IncidentComments.AddRange(
             new IncidentComment
@@ -132,6 +139,17 @@ public static class DbSeeder
                 Text = "Внутрішня примітка аналітика для перевірки прав доступу.",
                 IsInternal = true,
                 CreatedAtUtc = new DateTimeOffset(2026, 8, 1, 9, 45, 0, TimeSpan.Zero)
+            },
+            // Lab 05: новий публічний коментар із безпечним тестовим маркером.
+            new IncidentComment
+            {
+                Id = Guid.Parse("30000000-0000-0000-0000-000000000005"),
+                Incident = aliceIncident,
+                Author = morgan,
+                Text = Lab05Marker,
+                IsInternal = false,
+                CreatedAtUtc = new DateTimeOffset(
+                    2026, 8, 1, 9, 35, 0, TimeSpan.Zero)
             });
 
         dbContext.IncidentStatusHistory.Add(

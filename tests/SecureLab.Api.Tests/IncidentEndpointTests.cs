@@ -88,11 +88,15 @@ public sealed class IncidentEndpointTests(SecureLabApiFactory factory)
         using var client = factory.CreateClient();
 
         var html = await client.GetStringAsync("/auth-lab.html");
-
-        Assert.DoesNotContain(
-            "innerHTML", html, StringComparison.Ordinal);
+        var script = await client.GetStringAsync("/auth-lab.js");
 
         Assert.Contains(
-            "textContent", html, StringComparison.Ordinal);
+            "/auth-lab.js", html, StringComparison.Ordinal);
+
+        Assert.DoesNotContain(
+            "innerHTML", script, StringComparison.Ordinal);
+
+        Assert.Contains(
+            "textContent", script, StringComparison.Ordinal);
     }
 }
