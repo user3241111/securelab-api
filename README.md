@@ -136,3 +136,51 @@ docs/                    карта архітектури, варіант, ма
 
 Перед commit перегляньте `git status`, `git diff --staged` і переконайтеся, що
 до Git не потрапили `.env`, cookies, tokens, реальні passwords, dumps або logs.
+
+## 8. Поточний стан після ЛР6
+
+Цей розділ описує гілку `lab/6-hardening-review`. Попередні розділи README стосуються початкового starter.
+
+### Передумови
+
+- .NET SDK 10.0.303 (`global.json`: 10.0.100, latestFeature).
+- Docker із підтримкою Docker Compose.
+- Git.
+- Локальна PostgreSQL на `127.0.0.1:54329`.
+
+### Перевірка середовища
+
+`dotnet --version`
+
+`docker compose version`
+
+`git branch --show-current`
+
+### Запуск PostgreSQL
+
+`docker compose --env-file infra/.env.example -f infra/compose.yaml up -d --wait`
+
+### Збірка та автоматизовані тести
+
+`dotnet build src/SecureLab.Api/SecureLab.Api.csproj --configuration Release`
+
+`dotnet test tests/SecureLab.Api.Tests/SecureLab.Api.Tests.csproj --configuration Release`
+
+Останній підтверджений результат до фінальної перевірки: 21/21 тестів успішно, 0 помилок.
+
+**Увага:** не запускайте `--reset-database`, якщо потрібно зберегти наявні дані.
+
+### Документація безпеки
+
+- `docs/security-review.md` — результати перевірок.
+- `docs/threat-model.md` — модель загроз.
+- `docs/findings/F-01-short-name.md` — Accepted (study-only).
+- `docs/findings/F-02-csrf.md` — Fixed.
+- `tests/http/lab-02-search.http` — сценарії пошуку.
+- `tests/http/lab-04-access.http` — сценарії авторизації.
+
+### Відомі обмеження
+
+HTTPS/HSTS та login rate limiting не підтверджено. Повний Stored XSS regression і browser UI smoke не виконано. Logout потребує CSRF-токена.
+
+Навчальні credentials PostgreSQL не можна використовувати поза локальним середовищем.

@@ -61,10 +61,13 @@ public sealed class AuthorizationTests(SecureLabApiFactory factory)
 
     // A-06: Reporter cannot update a foreign incident.
     [Fact]
-public async Task A04_Reporter_CannotUpdateForeignIncident()    {
+    public async Task A04_Reporter_CannotUpdateForeignIncident()
+    {
         using var client = await factory.LoginAsync("alice", Password);
 
-        using var response = await client.PutAsJsonAsync(
+        using var response = await SendWithCsrfAsync(
+            client,
+            HttpMethod.Put,
             $"/api/incidents/{DbSeeder.BobIncidentId}",
             new
             {
@@ -77,10 +80,13 @@ public async Task A04_Reporter_CannotUpdateForeignIncident()    {
 
     // A-07: Deletion is forbidden by the access matrix.
     [Fact]
-public async Task A04_Reporter_CannotDeleteOwnIncident()    {
+    public async Task A04_Reporter_CannotDeleteOwnIncident()
+    {
         using var client = await factory.LoginAsync("alice", Password);
 
-        using var response = await client.DeleteAsync(
+        using var response = await SendWithCsrfAsync(
+            client,
+            HttpMethod.Delete,
             $"/api/incidents/{DbSeeder.AliceIncidentId}");
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -92,13 +98,41 @@ public async Task A04_Reporter_CannotDeleteOwnIncident()    {
     {
         using var client = await factory.LoginAsync("alice", Password);
 
-        using var response = await client.PutAsJsonAsync(
+        using var response = await SendWithCsrfAsync(
+            client,
+            HttpMethod.Put,
             $"/api/incidents/{DbSeeder.AliceIncidentId}",
             new
             {
                 title = "Test title",
                 description = "Test description",
-                ownerUserId = Guid.Parse("10000000-0000-0000-0000-000000000002")            });
+                ownerUserId = Guid.Parse(
+                    "10000000-0000-0000-0000-000000000002")
+            });
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    // Lab 06: Requests without a CSRF token must be rejected.
+    [Fact]
+    public async Task CSRF_AuthenticatedRequestWithoutToken_ReturnsBadRequest()
+    {
+        using var client = await factory.LoginAsync("alice", Password);
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/api/incidents")
+        {
+            Content = JsonContent.Create(new
+            {
+                title = $"CSRF negative test {Guid.NewGuid():N}",
+                description = "Request without CSRF token",
+                severity = "Low",
+                occurredAtUtc = DateTimeOffset.UtcNow
+            })
+        };
+
+        using var response = await client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -133,9 +167,10 @@ public async Task A04_Reporter_CannotDeleteOwnIncident()    {
     {
         using var client = await factory.LoginAsync("alice", Password);
 
-        using var response = await client.PostAsync(
-            $"/api/incidents/{DbSeeder.AliceIncidentId}/triage",
-            null);
+        using var response = await SendWithCsrfAsync(
+            client,
+            HttpMethod.Post,
+            $"/api/incidents/{DbSeeder.AliceIncidentId}/triage");
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
@@ -157,8 +192,10 @@ public async Task A04_Reporter_CannotDeleteOwnIncident()    {
         var beforeStatus = await ReadStatusAsync(beforeResponse);
         Assert.Equal("New", beforeStatus);
 
-        using var triageResponse = await client.PostAsync(
-            $"/api/incidents/{incidentId}/triage", null);
+        using var triageResponse = await SendWithCsrfAsync(
+            client,
+            HttpMethod.Post,
+            $"/api/incidents/{incidentId}/triage");
 
         Assert.Equal(HttpStatusCode.Forbidden, triageResponse.StatusCode);
 
@@ -189,8 +226,10 @@ public async Task A04_Reporter_CannotDeleteOwnIncident()    {
         var beforeStatus = await ReadStatusAsync(beforeResponse);
         Assert.Equal("New", beforeStatus);
 
-        using var triageResponse = await client.PostAsync(
-            $"/api/incidents/{incidentId}/triage", null);
+        using var triageResponse = await SendWithCsrfAsync(
+            client,
+            HttpMethod.Post,
+            $"/api/incidents/{incidentId}/triage");
 
         Assert.Equal(HttpStatusCode.NoContent, triageResponse.StatusCode);
 
@@ -207,7 +246,9 @@ public async Task A04_Reporter_CannotDeleteOwnIncident()    {
     private static async Task<Guid> CreateNewIncidentAsync(
         HttpClient client)
     {
-        using var response = await client.PostAsJsonAsync(
+        using var response = await SendWithCsrfAsync(
+            client,
+            HttpMethod.Post,
             "/api/incidents",
             new
             {
@@ -225,6 +266,39 @@ public async Task A04_Reporter_CannotDeleteOwnIncident()    {
         return document.RootElement.GetProperty("id").GetGuid();
     }
 
+    // Lab 06: Send authenticated requests with a valid CSRF token.
+    private static async Task<HttpResponseMessage> SendWithCsrfAsync(
+        HttpClient client,
+        HttpMethod method,
+        string url,
+        object? body = null)
+    {
+        using var tokenResponse = await client.GetAsync(
+            "/api/antiforgery/token");
+
+        Assert.Equal(HttpStatusCode.OK, tokenResponse.StatusCode);
+
+        using var tokenDocument = JsonDocument.Parse(
+            await tokenResponse.Content.ReadAsStringAsync());
+
+        var token = tokenDocument.RootElement
+            .GetProperty("token")
+            .GetString();
+
+        Assert.False(string.IsNullOrWhiteSpace(token));
+
+        using var request = new HttpRequestMessage(method, url);
+
+        request.Headers.Add("X-CSRF-TOKEN", token);
+
+        if (body is not null)
+        {
+            request.Content = JsonContent.Create(body);
+        }
+
+        return await client.SendAsync(request);
+    }
+
     private static async Task<string?> ReadStatusAsync(
         HttpResponseMessage response)
     {
@@ -235,5 +309,4 @@ public async Task A04_Reporter_CannotDeleteOwnIncident()    {
             .GetProperty("status")
             .GetString();
     }
-
 }

@@ -17,6 +17,7 @@ public static class IncidentTriageEndpoints
             .WithName("TriageIncident")
             .WithTags("Incidents")
             .RequireAuthorization()
+            .AddEndpointFilter(CsrfEndpointFilter.ValidateAsync)
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
