@@ -29,6 +29,7 @@ public static class IncidentEndpoints
 
         group.MapPut("/{id:guid}", UpdateContentAsync)
             .WithName("UpdateIncidentContent")
+            .AddEndpointFilter(CsrfEndpointFilter.ValidateAsync)
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -36,6 +37,7 @@ public static class IncidentEndpoints
 
         group.MapDelete("/{id:guid}", DeleteAsync)
             .WithName("DeleteIncident")
+            .AddEndpointFilter(CsrfEndpointFilter.ValidateAsync)
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound);

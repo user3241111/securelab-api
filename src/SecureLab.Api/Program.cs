@@ -1,5 +1,6 @@
 
 using SecureLab.Api.Scaffolding;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 using SecureLab.Api.Application.Incidents;
@@ -14,6 +15,12 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 
 builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
+
+// Lab 06: CSRF protection
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = "X-CSRF-TOKEN";
+});
 
 // Lab 05: CORS policy
 builder.Services.AddCors(options =>
@@ -58,24 +65,28 @@ if (resetRequested)
     return;
 }
 
-app.UseExceptionHandler();
-app.UseStatusCodePages();
-
 app.Use(async (context, next) =>
 {
-    context.Response.Headers.XContentTypeOptions = "nosniff";
-    context.Response.Headers.Append("Referrer-Policy", "no-referrer");
+    context.Response.OnStarting(() =>
+    {
+        context.Response.Headers.XContentTypeOptions = "nosniff";
+        context.Response.Headers["Referrer-Policy"] = "no-referrer";
 
-    context.Response.Headers.Append(
-        "Content-Security-Policy",
-        "default-src 'self'; script-src 'self'; style-src 'self'; " +
-        "connect-src 'self'; img-src 'self'; object-src 'none'; " +
-        "base-uri 'self'; frame-ancestors 'none'");
+        context.Response.Headers["Content-Security-Policy"] =
+            "default-src 'self'; script-src 'self'; style-src 'self'; " +
+            "connect-src 'self'; img-src 'self'; object-src 'none'; " +
+            "base-uri 'self'; frame-ancestors 'none'";
 
-    context.Response.Headers.Append("X-Frame-Options", "DENY");
+        context.Response.Headers["X-Frame-Options"] = "DENY";
+
+        return Task.CompletedTask;
+    });
 
     await next(context);
 });
+
+app.UseExceptionHandler();
+app.UseStatusCodePages();
 
 if (app.Environment.IsDevelopment())
 {
@@ -89,8 +100,28 @@ app.UseCors("Lab05Cors");
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Lab 06: Antiforgery middleware
+app.UseAntiforgery();
+
 app.UseDefaultFiles();
 app.UseStaticFiles();
+
+// Lab 06: Same-origin CSRF token endpoint
+app.MapGet("/api/antiforgery/token", (
+    HttpContext context,
+    IAntiforgery antiforgery) =>
+{
+    var tokens = antiforgery.GetAndStoreTokens(context);
+
+    context.Response.Headers.CacheControl = "no-store";
+
+    return Results.Ok(new
+    {
+        token = tokens.RequestToken
+    });
+})
+.RequireAuthorization()
+.WithName("GetAntiforgeryToken");
 
 app.MapGet("/health", async (
     SecureLabDbContext dbContext,
@@ -109,6 +140,7 @@ app.MapIncidentCommentEndpoints();
 app.MapIncidentTriageEndpoints();
 app.MapLab03Identity();
 app.MapLab02Endpoints();
+
 
 app.MapFallbackToFile("index.html");
 

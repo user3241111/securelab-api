@@ -100,20 +100,41 @@ public sealed class AuthenticationMechanicsTests(SecureLabApiFactory factory)
 
         Assert.False(string.IsNullOrWhiteSpace(bobName));
 
+        // Lab 06: Obtain a CSRF token using the authenticated session.
+        using var csrfResponse = await client.GetAsync(
+            "/api/antiforgery/token");
+
+        Assert.Equal(HttpStatusCode.OK, csrfResponse.StatusCode);
+
+        using var csrfDocument = JsonDocument.Parse(
+            await csrfResponse.Content.ReadAsStringAsync());
+
+        var csrfToken = csrfDocument.RootElement
+            .GetProperty("token")
+            .GetString();
+
+        Assert.False(string.IsNullOrWhiteSpace(csrfToken));
+
         // Attempt to assign Bob's new incident to Alice.
         var forgedAliceId =
             "10000000-0000-0000-0000-000000000001";
 
-        using var createResponse = await client.PostAsJsonAsync(
-            "/api/incidents",
-            new
+        using var createRequest = new HttpRequestMessage(
+            HttpMethod.Post, "/api/incidents")
+        {
+            Content = JsonContent.Create(new
             {
                 title = $"A05 owner test {Guid.NewGuid():N}",
                 description = "Forged owner security test",
                 severity = "Low",
                 occurredAtUtc = DateTimeOffset.UtcNow,
                 ownerUserId = forgedAliceId
-            });
+            })
+        };
+
+        createRequest.Headers.Add("X-CSRF-TOKEN", csrfToken);
+
+        using var createResponse = await client.SendAsync(createRequest);
 
         Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
 

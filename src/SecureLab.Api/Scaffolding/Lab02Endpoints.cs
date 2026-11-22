@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
+using SecureLab.Api.Presentation.Endpoints;
 
 namespace SecureLab.Api.Scaffolding;
 
@@ -191,7 +192,8 @@ public static class Lab02Endpoints
                     incident.CreatedAtUtc
                 });
         })
-        .RequireAuthorization();
+        .RequireAuthorization()
+        .AddEndpointFilter(CsrfEndpointFilter.ValidateAsync);
     }
 }
 
